@@ -16,12 +16,15 @@ myvenv\Scripts\activate
 
 Install the dependencies:
 ```bash
-pip install pandas
 pip install -r requirements.txt
-pip install pyspellchecker
 pip install azure-cognitiveservices-vision-computervision
 pip install msrest
-pip install XlsxWriter
+pip install pandas
+pip install pathlib
+pip install pytesseract
+pip install opencv-python
+pip install Pillow
+pip install azure-core
 ```
 Run the script:
 ```bash

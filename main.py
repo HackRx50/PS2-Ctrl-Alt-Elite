@@ -1,69 +1,91 @@
 import os
-import sys
+import re
 import time
 import pandas as pd
-from azure.cognitiveservices.vision.computervision import ComputerVisionClient
-from azure.cognitiveservices.vision.computervision.models import OperationStatusCodes
-from msrest.authentication import CognitiveServicesCredentials
+import sys
 from pathlib import Path
+import pytesseract
+from PIL import Image
+import cv2
+from azure.ai.formrecognizer import DocumentAnalysisClient
+from azure.core.credentials import AzureKeyCredential
+from concurrent.futures import ThreadPoolExecutor, as_completed  
 
-# Set Azure credentials
-os.environ['AZURE_COMPUTER_VISION_SUBSCRIPTION_KEY'] = '58f17158504d499f88750389e3646849'
-os.environ['AZURE_COMPUTER_VISION_ENDPOINT'] = 'https://testingmine.cognitiveservices.azure.com/'
-
-# Retrieve Azure credentials from environment variables
-subscription_key = os.environ['AZURE_COMPUTER_VISION_SUBSCRIPTION_KEY']
-endpoint = os.environ['AZURE_COMPUTER_VISION_ENDPOINT']
-
-# Create the Computer Vision client
-computervision_client = ComputerVisionClient(endpoint, CognitiveServicesCredentials(subscription_key))
-
-def read_image_from_path(image_path):
-    with open(image_path, "rb") as image:
-        read_response = computervision_client.read_in_stream(image, raw=True)
-        operation_location = read_response.headers["Operation-Location"]
-        operation_id = operation_location.split("/")[-1]
-
-        while True:
-            result = computervision_client.get_read_result(operation_id)
-            if result.status not in ['notStarted', 'running']:
-                break
-            time.sleep(1)
-        if result.status == OperationStatusCodes.succeeded:
-            return result.analyze_result.read_results
-    return None
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Azure Credentials
+os.environ['AZURE_FORM_RECOGNIZER_ENDPOINT'] = 'https://hackerx47.cognitiveservices.azure.com/'
+os.environ['AZURE_FORM_RECOGNIZER_KEY'] = '69db9919b6834f8e8b8ab528798b42e8'
 
 
-def extract_diagnosis(read_results):
-    target_keywords = {"provisional diagnosis", "diagnosis", "provisional diagnosis:"}
-    section_indicators = {
-        "proposed line of treatment", "treatment:", "investigation:", "surgical:",
-        "management:", "care:", "drug administration", "surgery:", "icd 10 code", "next steps", "plan of care",
-        "i.", "ii.", "iii.", "iv.", "v."
-    }
-    diagnosis_lines = []
-    capture = False
-    for page in read_results:
+subscription_key = os.environ['AZURE_FORM_RECOGNIZER_KEY']
+endpoint = os.environ['AZURE_FORM_RECOGNIZER_ENDPOINT']
+
+
+document_analysis_client = DocumentAnalysisClient(
+    endpoint=endpoint, credential=AzureKeyCredential(subscription_key)
+)
+
+
+
+def clean_text(text):
+    text = re.sub(r'\s+', ' ', text)  
+    text = re.sub(r'[^\w\s]', ' ', text)  
+    text = re.sub(r'\b(proposed treatment|treatment plan|surgery|surgical management|icd 10 code|next steps)\b', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b(i\.|ii\.|iii\.|iv\.|v\.|1\.|2\.|3\.|4\.|5\.)\b', '', text)  
+    text = re.sub(r'\b(proposed treatment|treatment plan|surgery|surgical management|icd 10 code|next steps|G|i|1|L|Proposed line of treatment)\b', '', text, flags=re.IGNORECASE)
+    return text.strip()  
+
+def extract_text_tesseract(image_path):
+    image = Image.open(image_path).convert("RGB")
+    return pytesseract.image_to_string(image)
+
+def preprocess_image(image_path):
+    image = cv2.imread(str(image_path))
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, binary_image = cv2.threshold(gray_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    blurred_image = cv2.GaussianBlur(binary_image, (5, 5), 0)
+    return blurred_image
+
+def read_image_with_document_intelligence(image_path):
+    preprocessed_image = preprocess_image(image_path)
+    with open(image_path, "rb") as image_file:
+        image_bytes = image_file.read()
+
+    
+    poller = document_analysis_client.begin_analyze_document(
+        "prebuilt-layout", document=image_bytes
+    )
+    result = poller.result()
+    return result
+
+def extract_diagnosis_from_layout(result):
+    target_keywords = {"provisional diagnosis", "diagnosis", "dx", "diagnostic impression", "clinical diagnosis", "provisional dx"}
+    capture_next_line = False
+    diagnosis_text = None
+
+    for page in result.pages:
         for line in page.lines:
-            text = line.text.strip().lower()
+            text = line.content.strip()
 
-            if not capture and any(keyword in text for keyword in target_keywords):
-                capture = True
-                parts = text.split(max(target_keywords, key=len))
-                diagnosis_part = parts[1].strip() if len(parts) > 1 else ""
-                if diagnosis_part:  # Only start capture if there's text after the keyword
-                    diagnosis_lines.append(diagnosis_part)
-            elif capture:
-                if any(indicator in text for indicator in section_indicators):
-                    capture = False  # Stop capturing if a section indicator line is detected
-                else:
-                    # Continue capturing all text until we hit a stopping condition
-                    diagnosis_lines.append(line.text.strip())
-    diagnosis_text = ' '.join(diagnosis_lines).strip()
-    # Post-processing to remove any trailing "i.", "ii."
-    diagnosis_text = diagnosis_text.rstrip("i. ").rstrip("ii. ").rstrip("iii. ").rstrip("iv. ").rstrip("v. ").strip()
-    return diagnosis_text if diagnosis_text else "No provisional diagnosis found"
+            if diagnosis_text:
+                continue
+                
+            if any(keyword in text.lower() for keyword in target_keywords):
+                capture_next_line = True  
+                continue  
 
+            if capture_next_line:
+                diagnosis_text = clean_text(text)  
+                break  
+
+    return diagnosis_text if diagnosis_text else "No Provisional Diagnosis Found"
+
+def process_image(image_path):
+    print(f"Processing file: {image_path}...")
+
+    result = read_image_with_document_intelligence(image_path)
+    diagnosis = extract_diagnosis_from_layout(result)
+    return image_path.name, diagnosis
 
 def save_to_excel(data, output_excel_path):
     df = pd.DataFrame(data, columns=["file_name", "provisional_diagnosis"])
@@ -75,47 +97,40 @@ def save_to_excel(data, output_excel_path):
         for col_num, value in enumerate(df.columns.values):
             worksheet.write(0, col_num, value, header_format)
 
-
 def process_folder(folder_path):
     folder_path = Path(folder_path)
-    data = []
-    if not folder_path.exists():
-        print(f"The folder path {folder_path} does not exist.")
-        return
-    if not os.access(folder_path, os.R_OK):
-        print(f"The folder path {folder_path} is not readable.")
-        return
     image_extensions = {'.jpg', '.jpeg', '.png'}
-    processed_file_count = 0
-    for filename in folder_path.iterdir():
-        if filename.suffix.lower() in image_extensions:
-            print(f"Processing file: {filename.name}")
-            read_results = read_image_from_path(filename)
-            if read_results:
-                diagnosis = extract_diagnosis(read_results)
-                data.append([filename.name, diagnosis])
-            else:
-                print(f"No results for {filename}.")
-            processed_file_count += 1
+    image_files = [f for f in folder_path.iterdir() if f.suffix.lower() in image_extensions]
+
+    if not image_files:
+        print(f"No image files found in {folder_path}.")
+        return
+
+    results = []
+
+    
+    with ThreadPoolExecutor() as executor:
+        futures = {executor.submit(process_image, img_file): img_file for img_file in image_files}
+        
+        for future in as_completed(futures):
+            img_file = futures[future]
+            try:
+                result = future.result()  
+                results.append(result)
+            except Exception as e:
+                print(f"Error processing {img_file}: {e}")
+
 
     output_excel_path = folder_path / "output_diagnoses.xlsx"
-    save_to_excel(data, output_excel_path)
-    print(f"Results saved to {output_excel_path}. Processed {processed_file_count} files.")
+    save_to_excel(results, output_excel_path)
+    print(f"Results saved to {output_excel_path}.")
 
-# def main():
-#     # Set the folder path directly
-#     folder_path = '/Users/apple/Downloads/HackRx/Sample_Imgs' 
-#     process_folder(folder_path)
-    
+
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python main.py <folder_path>")
         sys.exit(1)
-
-    # Get the folder path from the command-line argument
     folder_path = sys.argv[1]
     process_folder(folder_path)  
-
 
 if __name__ == "__main__":
     main()

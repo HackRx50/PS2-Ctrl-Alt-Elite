@@ -1,8 +1,8 @@
 # Medical-Diagnosis-Extraction
 
 ## About the Solution
-- Uses Azure Computer Vision for Optical Character Recognition (OCR).
-- Extracts and processes the diagnosis text specifically from handwritten medical forms (70% Accuracy).
+- Uses Azure Document Intelligence for Optical Character Recognition (OCR).
+- Extracts and processes the diagnosis text specifically from handwritten medical forms (88% Accuracy).
 - Saves the extracted data into an Excel file (output_diagnoses) with high accuracy and precision.
 
 ## How to run

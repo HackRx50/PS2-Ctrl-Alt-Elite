@@ -32,4 +32,4 @@ python main.py <folder_path>
 ```
 
 ## Output
-![Output Image](Output.jpeg)
+![Output Image](Output.jpg)

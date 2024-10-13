@@ -22,6 +22,7 @@ cycler==0.12.1
 cymem==2.0.8
 debugpy==1.8.7
 decorator==5.1.1
+et-xmlfile==1.1.0
 executing==2.1.0
 filelock==3.16.1
 flatbuffers==24.3.25
@@ -65,6 +66,7 @@ numpy==2.0.2
 oauthlib==3.2.2
 onnxruntime==1.19.2
 opencv-python==4.10.0.84
+openpyxl==3.1.5
 owlready2==0.47
 packaging==24.1
 pandas==2.2.3

@@ -15,8 +15,8 @@ from gliner import GLiNER
 pytesseract.pytesseract.tesseract_cmd = r'/opt/homebrew/bin/tesseract'
 
 # Azure Credentials for Form Recognizer
-os.environ['AZURE_FORM_RECOGNIZER_ENDPOINT'] = 'https://hackerx47.cognitiveservices.azure.com/'
-os.environ['AZURE_FORM_RECOGNIZER_KEY'] = '69db9919b6834f8e8b8ab528798b42e8'
+os.environ['AZURE_FORM_RECOGNIZER_ENDPOINT'] = ''
+os.environ['AZURE_FORM_RECOGNIZER_KEY'] = ''
 
 subscription_key = os.environ['AZURE_FORM_RECOGNIZER_KEY']
 endpoint = os.environ['AZURE_FORM_RECOGNIZER_ENDPOINT']
